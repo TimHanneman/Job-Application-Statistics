@@ -11,8 +11,20 @@ The raw unprocessed data will be included in three separate spreadsheets. I will
 
 It will be interesting to see if my impressions match what the statistics says.
 
-Here are my hypothesis:
-1) Easy Applications aren't very sucessful.
-2) Apply directly to company.
+Here are my hypotheses:
+1) Apply directly to the company.
+2) Easy Applications aren't very sucessful.
 3) For most applications you can assume rejection from an application within a week.
-4) Make or pay for a personalized resume. *(No data for this)
+4) There are still a few workplaces out there with a longer time frame before getting back to you.
+5) Make or pay for a personalized resume. *(No data for this)
+
+
+
+
+
+
+Future Investigations on Resumes:
+Does having a graduate degree make a difference?
+What is the impact of having certifications?
+Relevant work experience, or having continuous employeement?
+One page, or Two page resume?
