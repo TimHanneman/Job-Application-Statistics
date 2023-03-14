@@ -1,0 +1,332 @@
+---
+title: "How Long Until You Should Lose Hope From a Job Application"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  word_document: default
+---
+
+### Required Libraries
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(survival)
+```
+
+### Load the Data
+```{r}
+jobs = read.csv("Merged.csv")
+head(jobs)
+summary(jobs)
+```
+### Review the data for any needed data cleaning
+
+```{r}
+table(jobs$Application.site)
+```
+1. Consolidate LinkedIn. 
+
+```{r}
+table(jobs$Location)
+```
+2. I will simplify the areas into cities if possible, most are CA anyways. Monterey, Seaside, and Marina will be combined. Remove street from Salinas. Remove location from anything remote. Funny, there was a job listing for only a state, not even a city. Add an "Unknown" category.
+
+```{r}
+table(jobs$Response.)
+```
+3. The position removed response was unusual, and a new listing for the same job showed up again on LinkedIn a week later, so i'm going to count that as "Rejected". Seems like a suspicious way of rejecting an applicant though.
+
+```{r}
+table(jobs$Wage.Salary.Contract)
+```
+4. Need to add an additional "Unknown" Category.
+
+```{r}
+table(jobs$Job.Level)
+```
+5. This qualitative measure was either stated on the job posting, or inferred based on my experience and understanding from the job descriptions.
+
+
+```{r}
+table(jobs$Job.Type)
+```
+6. Tried to keep the categories simple. Business analytics, statistics, or data science were data science. Information technology including everything from help-desk to system administration to cybersecurity. The "Other" category included a job with the recreation department at CSUMB, or as a lab aide, which were low skill requirement jobs.
+
+### Data Cleaning & Preparation
+
+#### Checking the Categorical Data and Cleaning it up
+```{r}
+#1 Make sure that the values in each categorical column are consistent
+jobs$Application.site[jobs$Application.site == "Linkedin"] = "LinkedIn"
+
+#2 Consolidate Cities
+jobs$Location[jobs$Location == "Monterey, CA"] = "Monterey"
+jobs$Location[jobs$Location == "Monterey/Seaside"] = "Monterey"
+jobs$Location[jobs$Location == "Remote / Springfield, MO"] = "Remote"
+jobs$Location[jobs$Location == "Remote, Harnham Irvine, CA"] = "Remote"
+jobs$Location[jobs$Location == "Salinas, Work st."] = "Salinas"
+jobs$Location[jobs$Location == "Chicago, IL, USA"] = "Chicago"
+jobs$Location[jobs$Location == ""] = "Unknown"
+
+#3 The hospital is a bit suspicious that the position was "removed" and then about a week later the same position was posted on LinkedIn again. I'm going to count it as the application was Rejected.
+jobs$Response.[jobs$Response. == "Position Removed"] = "Rejected"
+
+#4 
+jobs$Wage.Salary.Contract[jobs$Wage.Salary.Contract == ""] = "Unknown"
+
+```
+
+
+#### Additional Data Cleaning
+
+```{r}
+jobs$Time.to.First.Response[jobs$Time.to.First.Response =="#NUM!"] = NA
+```
+Where there was never a response I need to input a value other than #NUM! where it couldn't be calculated.
+
+```{r}
+#We will want a binary vector for predicting response.
+#First clean-up the empty string entries with NA, then make a 0 or 1 variable.
+
+jobs$Time.to.First.Response[jobs$Time.to.First.Response == "" ] = NA
+
+jobs$Response.Y.N = ifelse(is.na(jobs$Time.to.First.Response), 0, 1)
+```
+##### There is a possibility of getting a rejection notice after an interview, but since that didn't happen in the data, i'm not going to make a more complicated imputation for this new column.
+
+
+```{r}
+#This one will create a binary variable for if an interview happened or not.
+
+jobs$Date.Interview[jobs$Date.Interview == ""] = NA
+jobs$Response.Int = ifelse(is.na(jobs$Date.Interview), 0, 1)
+```
+Two job applications applied to were deceptive causing me to get job spam from a placement agency instead of an actual interview. These were not counted as actual interviews, but were counted in the "time to a response column". Since deceptive recruiting is the same as a job not existing, position being removed, or getting rejected; [in that] You aren't getting that specific advertised job. (Any future applications through the placement agency would and should be counted separately)
+
+
+```{r}
+#For Easy Application and pay we can make these binary variables. I might not use this later, I might prefer to use "Y" or "N". Guess we will find out.
+jobs$Easy.Application.b = ifelse(jobs$Easy.Application.=="Y", 1, 0)
+```
+
+```{r}
+jobs$Paid.[jobs$Paid. == ""] = NA
+jobs$Paid.b = ifelse(is.na(jobs$Paid.), 0, 1)
+```
+Creating a binary variable 0 means job listing didn't include pay information, 1 means it included pay information.
+
+
+
+#### Calculate Time to Rejection
+##### Time to Rejection is defined as: 1) Rejection response recieved, 2) Over 60 days without a response 3) A response that isn't connected to a potential job offering, 4)Over 1 week with no response after an interview, or after a specificied amount of time shared with you.
+
+```{r}
+#This can be updated later as needed
+jobs$Time.to.Rejection[is.na(jobs$Time.to.Rejection)] = 30
+```
+The 60 day response limit is based on what a number of businesses i've talked with have stated, or post on their application sites. There are businesses that have longer delays before they may potentially contact you. 60 days seems reasonable for the general case though. However, since there have been no responses after 30 days, I will set 30 days for this limit.
+
+
+#### Calculate Descriptive Statistics
+```{r}
+#Application.site
+#Where did you apply and in what proportion?
+
+table(jobs$Application.site)
+table(jobs$Application.site)/sum(table(jobs$Application.site))
+
+ggplot(jobs,aes(x=Application.site)) +
+  geom_bar()
+  #scale_x_discrete(jobs$Application.site)+
+  #scale_fill_brewer(palette = "Set1")
+```
+
+```{r}
+#Location
+#Where were the job offerings applied to located & in what proportion? (How many were remote jobs?)
+
+table(jobs$Application.site)
+proportion_of_remote = 14/32
+ggplot(jobs, aes(x=Location)) + geom_bar()
+
+#ggplot(c(14,32), aes(x=c("remote","in-person"),y=c(14,32))) + geom_bar()
+barplot(c(14,32),names.arg = c("remote", "in-person"))
+```
+
+
+
+
+```{r}
+df <- data.frame(matrix(nrow=2, ncol = 2))
+colnames(df) <- c('Label','Percent')
+#names(df) <- c("Remote", "In-Person")
+df$Label <- c("Remote","In-Person")
+df$Percent <- c(round(proportion_of_remote,2),round(1-proportion_of_remote,2))
+df$group <- c("blue","red")
+```
+
+```{r}
+#Un-Comment below to save image.
+#tiff("work_type.tiff", units="in", width=5, height=5, res=300)
+ggplot(df, aes(fill = group, ymax = Percent, ymin = 0, xmax = 2, xmin = 1)) +
+ geom_rect(aes(ymax=1, ymin=0, xmax=2, xmin=1), fill ="#ece8bd") +
+ geom_rect() + 
+ coord_polar(theta = "y",start=-pi/2) + xlim(c(0, 2)) + ylim(c(0,2)) +
+ geom_text(aes(x = 0, y = 0, label = as.character(Percent), colour=group), size=6.5, family="sans") +
+ geom_text(aes(x=1.5, y=1.5, label=Label), family="sans", size=4.2) + 
+ facet_wrap(~Label, ncol = 1) +
+ theme_void() +
+ scale_fill_manual(values = c("red"="#eb303f", "blue"="#3091eb")) +
+ scale_colour_manual(values = c("red"="#eb303f", "blue"="#3091eb")) +
+ theme(strip.background = element_blank(),
+ strip.text.x = element_blank()) +
+ guides(fill=FALSE) +
+ guides(colour=FALSE)+
+  ggtitle("Type of workplaces")
+
+#Un-Comment below to save image.
+#dev.off()
+
+```
+
+
+```{r}
+#Easy Application
+#How many easy applications were sent in & how many traditional applications were sent?
+
+table(jobs$Easy.Application.)
+proportion_of_easy_app = 38/139
+```
+
+```{r}
+#Easy Application
+
+###(Can you identify different types of company e.g. cluster them?)
+
+```
+
+```{r}
+#Response.
+#How many companies ghost applicants? (I wonder if that's why so many applicants now ghost interviews? Food for thought)
+x = table(jobs$Response.)
+x
+table(jobs$Response.)/sum(table(jobs$Response.))
+
+print("Proportion of Responses out of all applications sent")
+b = unname((x[2]+x[3])/(x[1]+x[2]+x[3]))
+b
+```
+
+```{r}
+#How many interviews were deceptive?
+not_a_job = 2
+
+#How likely is it to get an interview?
+interview_likelihood = 12/178
+```
+
+
+```{r}
+#Time.to.First.Response
+#What is the average time until the first response?
+
+x_sum = as.numeric(jobs$Time.to.First.Response[!is.na(jobs$Time.to.First.Response)])
+time.to.first.response = mean(x_sum)
+time.to.first.response
+```
+
+```{r}
+#Time.to.Interview
+#How long from the first response is the interview normally scheduled?
+#Date of first response minus date of second response
+
+jobs$Date.of.1st.Response[jobs$Date.of.1st.Response == ""] = NA
+jobs$Date.of.1st.Response = as.Date(jobs$Date.of.1st.Response, format= "%m/%d/%Y")
+
+jobs$Date.Interview[jobs$Date.Interview == ""] = NA
+jobs$Date.Interview = as.Date(jobs$Date.Interview, format="%m/%d/%Y")
+
+```
+
+```{r}
+x_date = as.numeric(difftime(jobs$Date.Interview,jobs$Date.of.1st.Response,units="days"))
+mean(x_date[!is.na(x_date)])
+```
+It is likely that this number is not a true mean. It doesn't match with my previous experience, and the sample size for this is extra small.
+
+
+```{r}
+#Time.to.Rejection
+#How long does it normally take for an application to be rejected if you get an explicit rejection?
+mean(jobs$Time.to.Rejection[!jobs$Time.to.Rejection==30])
+```
+
+### Data Investigations and Modeling
+
+#### What factors might be related to getting an Interview?
+```{r}
+#Pay Type, Amount, Job.Level, Industry
+#Does a company posting compensation type, amount, or job level matter for: Getting an Interview?
+fit = lm(jobs$Response.Int~ Paid.b + Wage.Amount+ Salary.Amount + Job.Level, data=jobs)
+summary(fit)
+     #The quick answer is no, it doesn't make a difference.
+
+```
+#### Is the ease of the application submission process predictive of getting a response?
+```{r}
+fit = lm(jobs$Response.Y.N~ Easy.Application., data=jobs)
+summary(fit)
+```
+Yes, it is actually. This was a bit surprising.
+
+
+```{r}
+#What is the survival analysis like (Right Censored)? E.G. What is the likelihood that an application will not be responded to overtime?
+#How long should you hold out hope that you will be getting a job?
+#fit2 = survfit( Surv( time, event ) ~ age.group, data=aids )
+
+sur_fit = survfit( Surv(Time.to.Rejection,Response.Y.N) ~ Easy.Application. ,data=jobs)
+sur_fit
+plot(sur_fit, col=c("darkgreen","royalblue4"), lty=c(1,6), bg="grey", lwd=2, sub="The higher the line the less likely you are to be contacted. A drop represents getting contacted. Lower is better.", main="Does the Application Process Indicate How Rude a Company is?", xlab="Days Since Job Application Submitted", ylab="Chance of No Response", cex.sub=.75)
+legend("topright", lty=c(6,1), col=c("royalblue4","darkgreen"), legend=c("Easy Application","Long Application"), bty="n", bg='white')
+
+```
+
+
+```{r}
+sur_fit = survfit( Surv(Time.to.Rejection,Response.Y.N) ~ Job.Type ,data=jobs)
+sur_fit
+plot(sur_fit, col=c(4,6,0,5,2,8), lty=c(3,6,0,5,2,8), lwd=2,sub="The higher the line the less likely you are to be contacted. A drop represents getting contacted. Lower is better.", main="How Good is the HR Department?",xlab="Days Since Job Application Submitted", ylab="Chances of No Response", cex.sub=.75)
+legend( "topright", lty=c(6,8,3,0,2,8), col=c(6,8,4,0,2,5), legend=c("Information Technology","Software Engineer","Data Science","","Retail","Restaurant" ), bty="n", bg='white')
+```
+
+```{r}
+sur_fit = survfit( Surv(Time.to.Rejection,Response.Y.N) ~ Job.Level ,data=jobs)
+sur_fit
+plot(sur_fit, col=c(2,4,"white","White"), lty=c(2,1,0,0), lwd=2, sub="The higher the line the less likely you are to be contacted. A drop represents getting contacted.", main="Likelihood of Being Contacted", xlab="Days Since Job Application Submitted", ylab="Chances of No Response", cex.sub=.75)
+legend( "bottomright", col=c(2,4,"white","white"),lty=c(2,1,0,0), legend=c("Entry","Intern"), bty="n", bg='white')
+```
+
+### Analysis APPENDIX
+
+#### These models below were mostly useless for what I was looking for (Getting Interviews from industry), but I did look at them...
+
+I used a standard approach for data investigation when you aren't sure what variables you should be including in a model. First I included everything, then removed features that didn't meet significance at an alpha level of 0.05 and re-examined. Handily marked in R by the Asterisks. Note these models were examining getting interviews, not just any job response.
+
+
+```{r}
+
+fit = glm(jobs$Response.Int ~ Application.site + Location + Easy.Application.b + Paid.b + Wage.Amount+ Salary.Amount + Job.Level + Job.Type, data=jobs)
+summary(fit)
+
+```
+
+```{r}
+fit = lm(jobs$Response.Int ~ Application.site + Job.Type, data=jobs)
+summary(fit)
+```
+If you are a student you might want to cozy up to people hoping for job offers, or apply to restaurants.
+The most disheartening part is that even an associates degree wasn't sufficient for even entry level help desk jobs. 
+(A job that that a high school diploma and a little bit of experience [or the right classes & teacher] is all that's needed.)
